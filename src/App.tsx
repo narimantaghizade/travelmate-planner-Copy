@@ -14,6 +14,7 @@ import { clearNavigationPreference, restoreNavigationPreference, saveNavigationP
 import type { NavigationSection } from './data/navigationPreference';
 import DocumentsPanel from './components/DocumentsPanel';
 import { acceptInvitationAndLoadTrip, InvitationAcceptanceError, invitationAuthRedirect, parseInvitation, removeInvitationFromUrl } from './data/invitationAcceptance';
+import { sendTripInvitation, type TripInvitationRole } from './data/tripInvitationSending';
 
 const STORAGE_KEY = 'travelmate-demo-v1';
 type Stored = { trips: Trip[]; bookings: Booking[]; expenses: Expense[] };
@@ -70,6 +71,14 @@ export default function App() {
   const [formError, setFormError] = useState('');
   const [selectedDestination, setSelectedDestination] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareEmail, setShareEmail] = useState('');
+  const [shareRole, setShareRole] = useState<TripInvitationRole>('editor');
+  const [sharePending, setSharePending] = useState(false);
+  const [shareMessage, setShareMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
+  const shareInFlightRef = useRef(false);
+  const shareButtonRef = useRef<HTMLButtonElement>(null);
+  const shareWasOpenRef = useRef(false);
   const [newTripOpen, setNewTripOpen] = useState(false);
   const [tripEditOpen, setTripEditOpen] = useState(false);
   const [tripDraft, setTripDraft] = useState({ name:'', city:'', start:'', end:'', description:'' });
@@ -102,6 +111,11 @@ export default function App() {
   }, [destinations, bookings]);
   const sorted = useMemo(() => sortItineraryDestinations(destinations), [destinations]);
   const plannedDays = useMemo(() => itineraryDates(trip?.start ?? '', trip?.end ?? '', destinations), [trip?.start, trip?.end, destinations]);
+
+  useEffect(() => {
+    if (shareWasOpenRef.current && !shareDialogOpen) shareButtonRef.current?.focus();
+    shareWasOpenRef.current = shareDialogOpen;
+  }, [shareDialogOpen]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -270,6 +284,64 @@ export default function App() {
     setData(emptyStored);
     setTripId('');
     setPage('Overview');
+  }
+
+  function openShareDialog() {
+    setShareEmail('');
+    setShareRole('editor');
+    setShareMessage(null);
+    setShareDialogOpen(true);
+  }
+
+  function closeShareDialog() {
+    if (shareInFlightRef.current) return;
+    setShareDialogOpen(false);
+    setShareMessage(null);
+  }
+
+  async function submitTripInvitation(event: React.FormEvent) {
+    event.preventDefault();
+    const client = supabase;
+    if (shareInFlightRef.current || !trip || !client || !authUser) return;
+
+    shareInFlightRef.current = true;
+    setSharePending(true);
+    setShareMessage(null);
+    try {
+      let sessionPresent = false;
+      try {
+        const { data: { session }, error } = await client.auth.getSession();
+        sessionPresent = Boolean(session && !error);
+      } catch {
+        sessionPresent = false;
+      }
+      if (!sessionPresent) {
+        setShareMessage({ kind: 'error', text: 'Your sign-in session is no longer valid. Sign in again before inviting someone.' });
+        return;
+      }
+
+      let result;
+      try {
+        result = await sendTripInvitation(
+          (functionName, options) => client.functions.invoke(functionName, options),
+          { tripId: trip.id, email: shareEmail, role: shareRole },
+        );
+      } catch {
+        result = { kind: 'error' as const, message: 'We could not confirm whether the invitation email was delivered. Check the invitation status before trying again.', uncertain: true };
+      }
+      if (result.kind === 'sent') {
+        const expiry = new Date(result.expiresAt);
+        const expiryLabel = Number.isNaN(expiry.getTime()) ? '' : ` It expires ${expiry.toLocaleDateString()}.`;
+        setShareMessage({ kind: 'success', text: `Invitation email sent to ${shareEmail.trim()}.${expiryLabel}` });
+      } else {
+        setShareMessage({ kind: 'error', text: result.message });
+      }
+    } catch {
+      setShareMessage({ kind: 'error', text: 'We could not confirm whether the invitation email was delivered. Check the invitation status before trying again.' });
+    } finally {
+      shareInFlightRef.current = false;
+      setSharePending(false);
+    }
   }
 
   function importBrowserDemo() {
@@ -517,7 +589,7 @@ export default function App() {
     </aside>
     {mobileNav && <button className="mobile-overlay" onClick={() => setMobileNav(false)} aria-label="Close navigation"/>}
     <main className="main-area">
-      <header className="topbar"><button className="icon-btn mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open menu"><Menu size={20}/></button><div className="breadcrumbs">My trips <ChevronRight size={14}/> <b>{trip?.name ?? 'Your workspace'}</b></div><div className="top-actions"><div className="demo-pill" title={cloudError || cloudLabel}><span/>{cloudLabel}</div>{supabase && authUser && <><button className="share-btn" onClick={importBrowserDemo}>Import local data</button><button className="share-btn" onClick={() => void signOut()}>Sign out</button></>}<button className="share-btn" onClick={() => setNotice('Shared trips require a secure invitation flow, which is not implemented yet.')}><Users size={16}/> Share trip</button></div></header>
+      <header className="topbar"><button className="icon-btn mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open menu"><Menu size={20}/></button><div className="breadcrumbs">My trips <ChevronRight size={14}/> <b>{trip?.name ?? 'Your workspace'}</b></div><div className="top-actions"><div className="demo-pill" title={cloudError || cloudLabel}><span/>{cloudLabel}</div>{supabase && authUser && <><button className="share-btn" onClick={importBrowserDemo}>Import local data</button><button className="share-btn" onClick={() => void signOut()}>Sign out</button><button ref={shareButtonRef} className="share-btn" onClick={openShareDialog} disabled={!trip || cloudStatus !== 'ready'} aria-label={`Invite someone to ${trip?.name ?? 'this trip'}`}><Users size={16}/> Share trip</button></>}</div></header>
       <div className="content">
         {(invitation.kind === 'token' || invitationStatus !== 'idle') && <section className="panel invitation-panel" aria-live="polite">
           <div className="panel-header"><div><h2>Trip invitation</h2><p>Accepting an invitation adds this trip to your signed-in TravelMate account.</p></div><Users size={21}/></div>
@@ -561,6 +633,13 @@ export default function App() {
     {showBookingForm && <Modal title={editingBookingId ? 'Edit booking' : 'Add a booking'} subtitle="Save confirmations and estimates with the trip." onClose={()=>{setShowBookingForm(false);setEditingBookingId(null);setFormError('');}}><form className="form-grid" onSubmit={addBooking}><label className="span-2">Booking name *<input required autoFocus value={newBooking.title} onChange={e=>setNewBooking({...newBooking,title:e.target.value})} placeholder="e.g. Return flight to Kraków"/></label><label>Type<select value={newBooking.kind} onChange={e=>setNewBooking({...newBooking,kind:e.target.value as BookingKind})}>{['Flight','Accommodation','Ticket','Activity','Restaurant','Transfer','Transport','Parking','Other'].map(kind=><option key={kind}>{kind}</option>)}</select></label><label>Status<select value={newBooking.status} onChange={e=>setNewBooking({...newBooking,status:e.target.value as Booking['status']})}>{['planned','confirmed','cancelled','completed'].map(status=><option key={status}>{status}</option>)}</select></label><label>Date<input type="date" value={newBooking.date} onChange={e=>setNewBooking({...newBooking,date:e.target.value})}/></label><label>Local time<input type="time" value={newBooking.time} onChange={e=>setNewBooking({...newBooking,time:e.target.value})}/></label><label>Estimated cost *<input required type="number" min="0" step="0.01" value={newBooking.price} onChange={e=>setNewBooking({...newBooking,price:Number(e.target.value)})}/></label><label>Currency *<input required minLength={3} maxLength={3} pattern="[A-Za-z]{3}" value={newBooking.currency} onChange={e=>setNewBooking({...newBooking,currency:e.target.value.toUpperCase()})} placeholder="EUR"/></label><label>Provider / airline / property<input value={newBooking.provider} onChange={e=>setNewBooking({...newBooking,provider:e.target.value})}/></label><label>Booking URL<input type="url" value={newBooking.bookingUrl} onChange={e=>setNewBooking({...newBooking,bookingUrl:e.target.value})} placeholder="https://…"/></label>{newBooking.kind==='Flight'&&<><label>Flight number<input value={newBooking.flight?.flightNumber ?? ''} onChange={e=>setNewBooking({...newBooking,flight:{...newBooking.flight!,flightNumber:e.target.value}})}/></label><label>Departure airport<input value={newBooking.flight?.departureAirport ?? ''} onChange={e=>setNewBooking({...newBooking,flight:{...newBooking.flight!,departureAirport:e.target.value}})}/></label><label>Arrival airport<input value={newBooking.flight?.arrivalAirport ?? ''} onChange={e=>setNewBooking({...newBooking,flight:{...newBooking.flight!,arrivalAirport:e.target.value}})}/></label><label>Departure time<input type="datetime-local" value={newBooking.flight?.departureAt ?? ''} onChange={e=>setNewBooking({...newBooking,flight:{...newBooking.flight!,departureAt:e.target.value}})}/></label><label>Arrival time<input type="datetime-local" value={newBooking.flight?.arrivalAt ?? ''} onChange={e=>setNewBooking({...newBooking,flight:{...newBooking.flight!,arrivalAt:e.target.value}})}/></label></>}{newBooking.kind==='Accommodation'&&<><label>Check-in<input type="datetime-local" value={newBooking.accommodation?.checkInAt ?? ''} onChange={e=>setNewBooking({...newBooking,accommodation:{...newBooking.accommodation!,checkInAt:e.target.value}})}/></label><label>Check-out<input type="datetime-local" value={newBooking.accommodation?.checkOutAt ?? ''} onChange={e=>setNewBooking({...newBooking,accommodation:{...newBooking.accommodation!,checkOutAt:e.target.value}})}/></label></>}<label className="span-2">Address / venue<input value={newBooking.address} onChange={e=>setNewBooking({...newBooking,address:e.target.value,accommodation:newBooking.accommodation?{...newBooking.accommodation,address:e.target.value}:undefined})} placeholder="Address, airport or venue"/></label><label className="span-2">Reference / confirmation number<input value={newBooking.reference} onChange={e=>setNewBooking({...newBooking,reference:e.target.value})}/></label><label className="span-2">Notes<textarea rows={3} value={newBooking.notes} onChange={e=>setNewBooking({...newBooking,notes:e.target.value})}/></label>{formError&&<div className="form-warning span-2" role="alert">{formError}</div>}<div className="modal-actions span-2"><button type="button" className="secondary-btn" onClick={()=>{setShowBookingForm(false);setEditingBookingId(null);}}>Cancel</button><button className="primary-btn" type="submit"><Check size={15}/> {editingBookingId?'Save changes':'Save booking'}</button></div></form></Modal>}
     {showExpenseForm && <Modal title={editingExpenseId?'Edit expense':'Record an expense'} subtitle="Actual payments are stored separately from estimates." onClose={()=>{setShowExpenseForm(false);setEditingExpenseId(null);setFormError('');}}><form className="form-grid" onSubmit={saveExpense}><label className="span-2">Description *<input required autoFocus value={newExpense.title} onChange={e=>setNewExpense({...newExpense,title:e.target.value})} placeholder="e.g. Museum tickets"/></label><label>Category *<input required value={newExpense.category} onChange={e=>setNewExpense({...newExpense,category:e.target.value})} placeholder="Food, transport, activity…"/></label><label>Date<input type="date" value={newExpense.date} onChange={e=>setNewExpense({...newExpense,date:e.target.value})}/></label><label>Amount *<input required type="number" min="0" step="0.01" value={newExpense.amount} onChange={e=>setNewExpense({...newExpense,amount:Number(e.target.value)})}/></label><label>Currency *<input required minLength={3} maxLength={3} pattern="[A-Za-z]{3}" value={newExpense.currency} onChange={e=>setNewExpense({...newExpense,currency:e.target.value.toUpperCase()})} placeholder="EUR"/></label><label className="span-2">Related booking (optional)<select value={newExpense.bookingId ?? ''} onChange={e=>setNewExpense({...newExpense,bookingId:e.target.value || null})}><option value="">None</option>{bookings.map(booking=><option key={booking.id} value={booking.id}>{booking.title}</option>)}</select></label><label className="span-2">Related destination (optional)<select value={newExpense.destinationId ?? ''} onChange={e=>setNewExpense({...newExpense,destinationId:e.target.value || null})}><option value="">None</option>{destinations.map(destination=><option key={destination.id} value={destination.id}>{destination.name}</option>)}</select></label><label className="span-2">Notes<textarea rows={3} value={newExpense.notes} onChange={e=>setNewExpense({...newExpense,notes:e.target.value})}/></label>{formError&&<div className="form-warning span-2" role="alert">{formError}</div>}<div className="modal-actions span-2"><button type="button" className="secondary-btn" onClick={()=>{setShowExpenseForm(false);setEditingExpenseId(null);}}>Cancel</button><button className="primary-btn" type="submit"><Check size={15}/> {editingExpenseId?'Save changes':'Record expense'}</button></div></form></Modal>}
     {newTripOpen && <Modal title="Manage your trips" subtitle="Create another trip or switch between your plans." onClose={()=>setNewTripOpen(false)}><div className="trip-modal-list">{data.trips.map(t=><button key={t.id} className={`trip-modal-row ${t.id===tripId?'chosen':''}`} onClick={()=>{setTripId(t.id);setNewTripOpen(false);setPage('Overview');}}><div className="trip-avatar">{t.city.slice(0,1)}</div><div><b>{t.name}</b><span>{t.city} · {t.destinations.length} places</span></div>{t.id===tripId&&<Check size={16}/>}</button>)}</div><form className="form-grid trip-create-form" onSubmit={createTrip}><div className="form-divider span-2"><span>CREATE A NEW TRIP</span></div><label className="span-2">Trip name *<input required value={tripName} onChange={e=>setTripName(e.target.value)} placeholder="e.g. Summer in Greece"/></label><label className="span-2">Main destination<input value={tripCity} onChange={e=>setTripCity(e.target.value)} placeholder="e.g. Santorini, Greece"/></label><div className="modal-actions span-2"><button type="button" className="secondary-btn" onClick={()=>setNewTripOpen(false)}>Close</button><button className="primary-btn" type="submit" disabled={tripCreatePending}>{tripCreatePending ? 'Saving…' : <><Plus size={15}/> Create trip</>}</button></div></form></Modal>}
+    {shareDialogOpen && trip && <Modal title="Invite someone to this trip" subtitle="The trip owner can invite a collaborator by email." onClose={closeShareDialog} canClose={!sharePending}><form className="form-grid" onSubmit={submitTripInvitation}>
+      <label className="span-2" htmlFor="invitation-email">Recipient email *<input id="invitation-email" type="email" autoComplete="email" required maxLength={254} autoFocus value={shareEmail} onChange={event=>setShareEmail(event.target.value)} placeholder="friend@example.com" disabled={sharePending}/></label>
+      <label className="span-2" htmlFor="invitation-role">Access level<select id="invitation-role" value={shareRole} onChange={event=>setShareRole(event.target.value as TripInvitationRole)} disabled={sharePending}><option value="editor">Editor — can make trip changes</option><option value="viewer">Viewer — can view the trip</option></select></label>
+      <p className="span-2 muted-small">Only trip owners can send invitations. TravelMate verifies your permission securely when you submit.</p>
+      {shareMessage && <div className={`${shareMessage.kind === 'success' ? 'form-success' : 'form-warning'} span-2`} role={shareMessage.kind === 'success' ? 'status' : 'alert'} aria-live="polite">{shareMessage.text}</div>}
+      <div className="modal-actions span-2"><button type="button" className="secondary-btn" onClick={closeShareDialog} disabled={sharePending}>Close</button><button className="primary-btn" type="submit" disabled={sharePending || !shareEmail.trim()}><Users size={15}/>{sharePending ? 'Sending invitation…' : 'Send invitation'}</button></div>
+    </form></Modal>}
     {notice && <div className="toast"><Check size={16}/>{notice}</div>}
   </div>;
 }
@@ -574,4 +653,29 @@ function DestinationRow({d,onSelect,onVisited,onDelete,onEdit,onMoveUp,onMoveDow
 
 function QuickCard({icon,tone,title,text,action}:{icon:React.ReactNode;tone:string;title:string;text:string;action:()=>void}) { return <button className="quick-card" onClick={action}><div className={`quick-icon ${tone}`}>{icon}</div><div><b>{title}</b><p>{text}</p></div><ChevronRight size={16}/></button>; }
 function EmptyInline({title,text,onClick}:{title:string;text:string;onClick:()=>void}) { return <div className="empty-inline"><div className="empty-inline-icon"><Compass size={20}/></div><b>{title}</b><p>{text}</p><button className="text-btn" onClick={onClick}>Get started <ArrowUpRight size={14}/></button></div>; }
-function Modal({title,subtitle,onClose,children}:{title:string;subtitle:string;onClose:()=>void;children:React.ReactNode}) { return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}}><section className="modal"><div className="modal-heading"><div><h2>{title}</h2><p>{subtitle}</p></div><button className="icon-btn" onClick={onClose} aria-label="Close dialog"><X size={18}/></button></div>{children}</section></div>; }
+function Modal({title,subtitle,onClose,canClose=true,children}:{title:string;subtitle:string;onClose:()=>void;canClose?:boolean;children:React.ReactNode}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (dialog && !dialog.open) dialog.showModal();
+    return () => {
+      if (dialog?.open) dialog.close();
+    };
+  }, []);
+
+  function requestClose() {
+    if (!canClose) return;
+    if (dialogRef.current?.open) dialogRef.current.close();
+    onClose();
+  }
+
+  return <dialog
+    ref={dialogRef}
+    className="modal-backdrop"
+    aria-labelledby="travelmate-dialog-title"
+    aria-describedby="travelmate-dialog-description"
+    onCancel={event => { event.preventDefault(); requestClose(); }}
+    onClick={event => { if (event.target === event.currentTarget) requestClose(); }}
+  ><section className="modal"><div className="modal-heading"><div><h2 id="travelmate-dialog-title">{title}</h2><p id="travelmate-dialog-description">{subtitle}</p></div><button type="button" className="icon-btn" onClick={requestClose} aria-label="Close dialog" disabled={!canClose}><X size={18}/></button></div>{children}</section></dialog>;
+}
