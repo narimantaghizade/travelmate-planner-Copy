@@ -1,0 +1,38 @@
+{
+  "version": "5",
+  "specifiers": {
+    "jsr:@deno/installer-shell-setup@*": "0.3.4"
+  },
+  "jsr": {
+    "@deno/installer-shell-setup@0.3.4": {
+      "integrity": "48665d1a737d487cce6874bc97bba70a5aeffa7053aca3f60df93c6fab8963b4"
+    }
+  },
+  "workspace": {
+    "packageJson": {
+      "dependencies": [
+        "npm:@eslint/js@^9.34.0",
+        "npm:@supabase/supabase-js@^2.57.0",
+        "npm:@types/leaflet@^1.9.20",
+        "npm:@types/node@^22.18.6",
+        "npm:@types/react-dom@^19.1.9",
+        "npm:@types/react@^19.1.12",
+        "npm:@vitejs/plugin-react@^4.7.0",
+        "npm:eslint-plugin-react-hooks@^5.2.0",
+        "npm:eslint-plugin-react-refresh@~0.4.20",
+        "npm:eslint@^9.34.0",
+        "npm:globals@^16.3.0",
+        "npm:leaflet@^1.9.4",
+        "npm:lucide-react@0.468",
+        "npm:react-dom@^19.1.1",
+        "npm:react-leaflet@5",
+        "npm:react@^19.1.1",
+        "npm:supabase@^2.120.0",
+        "npm:typescript-eslint@^8.42.0",
+        "npm:typescript@~5.9.2",
+        "npm:vite@^6.3.5",
+        "npm:vitest@^3.2.4"
+      ]
+    }
+  }
+}
