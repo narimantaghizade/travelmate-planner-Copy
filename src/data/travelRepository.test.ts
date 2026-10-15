@@ -33,9 +33,9 @@ describe('database conversion', () => {
       planned_date: null, planned_time: null, duration_minutes: 60, notes: '', priority: 'Optional', latitude: null,
       longitude: null, estimated_cost: 12.5, visited: false, sort_order: 0, created_at: '', updated_at: '',
     };
-    expect(destinationFromRow(row)).toMatchObject({ date: '', time: '', lat: 48.8566, lng: 2.3522, price: 12.5 });
-    expect(destinationToRow({ name: 'Museum', category: 'Attraction', address: '', date: '', time: '', duration: 60, notes: '', priority: 'Optional', lat: 1, lng: 2, price: 5 }, 'trip-uuid')).toMatchObject({
-      trip_id: 'trip-uuid', planned_date: null, planned_time: null, latitude: 1, longitude: 2, estimated_cost: 5,
+    expect(destinationFromRow(row)).toMatchObject({ date: '', time: '', lat: null, lng: null, price: 12.5 });
+    expect(destinationToRow({ name: 'Museum', category: 'Attraction', address: '', date: '', time: '', duration: 60, notes: '', priority: 'Optional', lat: null, lng: null, price: 5 }, 'trip-uuid')).toMatchObject({
+      trip_id: 'trip-uuid', planned_date: null, planned_time: null, latitude: null, longitude: null, estimated_cost: 5,
     });
   });
 

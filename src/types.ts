@@ -2,7 +2,7 @@ export type Category = 'Attraction' | 'Restaurant' | 'Accommodation' | 'Parking'
 export type Destination = {
   id: string; name: string; category: Category; address: string; date: string; time: string;
   duration: number; notes: string; priority: 'Must visit' | 'Optional' | 'Backup'; sortOrder?: number;
-  lat: number; lng: number; price: number; visited: boolean;
+  lat: number | null; lng: number | null; price: number; visited: boolean;
 };
 export type Trip = { id: string; name: string; city: string; start: string; end: string; description: string; destinations: Destination[] };
 export type BookingKind = 'Flight' | 'Accommodation' | 'Ticket' | 'Activity' | 'Restaurant' | 'Transfer' | 'Transport' | 'Parking' | 'Other';
